@@ -15,6 +15,7 @@ const {
   deleteCourt,
   updateVenue,
   updateCourt,
+  deleteVenue,
 } = require("../controllers/managerController");
 
 // Manager-only middleware
@@ -42,6 +43,7 @@ router.get("/venues/:id", protect, managerOnly, getVenueById);
 router.put("/venues/:id", protect, managerOnly, updateVenue);
 router.put("/courts/:id", protect, managerOnly, updateCourt);
 
+router.delete("/venues/:id", protect, managerOnly, deleteVenue);
 router.delete("/courts/:id", protect, managerOnly, deleteCourt);
 
 module.exports = router;

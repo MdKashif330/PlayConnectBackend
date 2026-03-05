@@ -53,8 +53,39 @@ const courtSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    paymentMethods: [
+      {
+        type: String,
+        enum: ["cash", "easypaisa", "jazzcash", "bank"],
+        default: ["cash"],
+      },
+    ],
+
+    accountDetails: {
+      bankName: {
+        type: String,
+        default: "",
+      },
+      accountTitle: {
+        type: String,
+        default: "",
+      },
+      accountNumber: {
+        type: String,
+        default: "",
+      },
+      easypaisaNumber: {
+        type: String,
+        default: "",
+      },
+      jazzcashNumber: {
+        type: String,
+        default: "",
+      },
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Court", courtSchema);

@@ -5,13 +5,13 @@ const Court = require("../models/Court");
 // CREATE VENUE (Manager)
 exports.createVenue = async (req, res) => {
   try {
-    const { name, location, latitude, longitude, facilities } = req.body;
+    const { name, description, address, location, facilities } = req.body;
 
     const venue = await Venue.create({
       name,
+      description: description || "",
+      address: address || "",
       location,
-      latitude,
-      longitude,
       facilities,
       manager: req.user.id,
     });
@@ -28,8 +28,15 @@ exports.createVenue = async (req, res) => {
 // CREATE COURT (Manager)
 exports.createCourt = async (req, res) => {
   try {
-    const { venueId, name, sportType, dimensions, pricePerSlot, facilities } =
-      req.body;
+    const {
+      venueId,
+      name,
+      sportType,
+      dimensions,
+      pricePerSlot,
+      paymentMethods,
+      accountDetails,
+    } = req.body;
 
     const court = await Court.create({
       venue: venueId,
@@ -37,7 +44,8 @@ exports.createCourt = async (req, res) => {
       sportType,
       dimensions,
       pricePerSlot,
-      facilities,
+      paymentMethods: paymentMethods || ["cash"],
+      accountDetails: accountDetails || {},
     });
 
     res.status(201).json({
@@ -45,6 +53,7 @@ exports.createCourt = async (req, res) => {
       court,
     });
   } catch (error) {
+    console.error("Create court error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -54,11 +63,9 @@ exports.getManagerBookings = async (req, res) => {
   try {
     const { status } = req.query; // Get status from query params
 
-    // Find venues owned by this manager
     const venues = await Venue.find({ manager: req.user.id });
     const venueIds = venues.map((v) => v._id);
 
-    // Build query
     let query = { venue: { $in: venueIds } };
     if (status && status !== "") {
       query.status = status;
@@ -193,21 +200,19 @@ exports.getVenueById = async (req, res) => {
   }
 };
 
-// Get courts for a venue (with venue filter)
+// Get courts for a venue
 exports.getCourts = async (req, res) => {
   try {
     const { venue } = req.query;
     let query = {};
 
     if (venue) {
-      // Verify manager owns the venue
       const venueDoc = await Venue.findById(venue);
       if (!venueDoc || venueDoc.manager.toString() !== req.user.id) {
         return res.status(403).json({ message: "Unauthorized" });
       }
       query.venue = venue;
     } else {
-      // If no venue filter, get all courts for manager's venues
       const venues = await Venue.find({ manager: req.user.id });
       const venueIds = venues.map((v) => v._id);
       query.venue = { $in: venueIds };
@@ -220,7 +225,7 @@ exports.getCourts = async (req, res) => {
   }
 };
 
-// Delete court (soft delete - set isActive: false)
+// Delete court
 exports.deleteCourt = async (req, res) => {
   try {
     const court = await Court.findById(req.params.id).populate("venue");
@@ -233,7 +238,6 @@ exports.deleteCourt = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // HARD DELETE - remove from database
     await Court.findByIdAndDelete(req.params.id);
 
     res.json({ message: "Court permanently deleted" });
@@ -246,9 +250,8 @@ exports.deleteCourt = async (req, res) => {
 exports.updateVenue = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, location, facilities } = req.body;
+    const { name, description, address, location, facilities } = req.body;
 
-    // Find venue and ensure it belongs to this manager
     const venue = await Venue.findOne({
       _id: id,
       manager: req.user.id,
@@ -258,44 +261,29 @@ exports.updateVenue = async (req, res) => {
       return res.status(404).json({ message: "Venue not found" });
     }
 
-    // Update fields (only update if provided)
     if (name) venue.name = name;
+    if (description !== undefined) venue.description = description;
+    if (address !== undefined) venue.address = address;
     if (location) {
       venue.location = {
-        address: location.address || venue.location.address,
-        latitude: location.latitude || venue.location.latitude,
-        longitude: location.longitude || venue.location.longitude,
+        address: location.address || venue.location?.address,
+        latitude: location.latitude || venue.location?.latitude,
+        longitude: location.longitude || venue.location?.longitude,
       };
     }
     if (facilities) {
       venue.facilities = {
-        lights:
-          facilities.lights !== undefined
-            ? facilities.lights
-            : venue.facilities.lights,
-        parking:
-          facilities.parking !== undefined
-            ? facilities.parking
-            : venue.facilities.parking,
-        cafeteria:
-          facilities.cafeteria !== undefined
-            ? facilities.cafeteria
-            : venue.facilities.cafeteria,
-        coaching:
-          facilities.coaching !== undefined
-            ? facilities.coaching
-            : venue.facilities.coaching,
-        sportsGoods:
-          facilities.sportsGoods !== undefined
-            ? facilities.sportsGoods
-            : venue.facilities.sportsGoods,
+        lights: facilities.lights ?? venue.facilities?.lights,
+        parking: facilities.parking ?? venue.facilities?.parking,
+        cafeteria: facilities.cafeteria ?? venue.facilities?.cafeteria,
+        coaching: facilities.coaching ?? venue.facilities?.coaching,
+        sportsGoods: facilities.sportsGoods ?? venue.facilities?.sportsGoods,
       };
     }
 
     const updatedVenue = await venue.save();
     res.json(updatedVenue);
   } catch (error) {
-    console.error("Update venue error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -304,16 +292,21 @@ exports.updateVenue = async (req, res) => {
 exports.updateCourt = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, sportType, dimensions, pricePerSlot } = req.body;
+    const {
+      name,
+      sportType,
+      dimensions,
+      pricePerSlot,
+      paymentMethods,
+      accountDetails,
+    } = req.body;
 
-    // Find court and verify ownership
     const court = await Court.findById(id).populate("venue");
 
     if (!court) {
       return res.status(404).json({ message: "Court not found" });
     }
 
-    // Check if manager owns the venue
     if (court.venue.manager.toString() !== req.user.id) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -329,11 +322,45 @@ exports.updateCourt = async (req, res) => {
       };
     }
     if (pricePerSlot) court.pricePerSlot = pricePerSlot;
+    if (paymentMethods) court.paymentMethods = paymentMethods;
+    if (accountDetails)
+      court.accountDetails = { ...court.accountDetails, ...accountDetails };
 
     const updatedCourt = await court.save();
     res.json(updatedCourt);
   } catch (error) {
     console.error("Update court error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Delete venue
+exports.deleteVenue = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const venue = await Venue.findOne({
+      _id: id,
+      manager: req.user.id,
+    });
+
+    if (!venue) {
+      return res.status(404).json({ message: "Venue not found" });
+    }
+
+    const courtsCount = await Court.countDocuments({ venue: id });
+    if (courtsCount > 0) {
+      return res.status(400).json({
+        message:
+          "Cannot delete venue with existing courts. Please delete all courts first.",
+      });
+    }
+
+    await Venue.findByIdAndDelete(id);
+
+    res.json({ message: "Venue deleted successfully" });
+  } catch (error) {
+    console.error("Delete venue error:", error);
     res.status(500).json({ message: error.message });
   }
 };
