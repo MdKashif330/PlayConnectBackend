@@ -16,6 +16,18 @@ exports.createEvent = async (req, res) => {
       courtIds,
     } = req.body;
 
+    console.log("Creating event with data:", req.body);
+
+    // Validate dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (end <= start) {
+      return res.status(400).json({
+        message: "End date must be after start date",
+      });
+    }
+
     // Validate that the courts belong to the manager's venue
     const courts = await Court.find({ _id: { $in: courtIds } }).populate(
       "venue",
@@ -50,8 +62,8 @@ exports.createEvent = async (req, res) => {
       courts: { $in: courtIds },
       $or: [
         {
-          startDate: { $lt: new Date(endDate) },
-          endDate: { $gt: new Date(startDate) },
+          startDate: { $lt: end },
+          endDate: { $gt: start },
         },
       ],
       status: { $ne: "cancelled" },
@@ -70,8 +82,8 @@ exports.createEvent = async (req, res) => {
       prize,
       entryFee,
       maxParticipants,
-      startDate,
-      endDate,
+      startDate: start,
+      endDate: end,
       courts: courtIds,
       venue: venueId,
       createdBy: req.user.id,
@@ -96,7 +108,7 @@ exports.getManagerEvents = async (req, res) => {
     const events = await Event.find({ venue: { $in: venueIds } })
       .populate("courts", "name sportType")
       .populate("venue", "name")
-      .populate("registeredParticipants.userId", "name email")
+      .populate("createdBy", "name email")
       .sort({ startDate: -1 });
 
     res.json(events);
@@ -112,7 +124,7 @@ exports.getEventById = async (req, res) => {
     const event = await Event.findById(req.params.id)
       .populate("courts", "name sportType pricePerSlot")
       .populate("venue", "name location")
-      .populate("registeredParticipants.userId", "name email phone");
+      .populate("createdBy", "name email");
 
     if (!event) {
       return res.status(404).json({ message: "Event not found" });
@@ -179,7 +191,7 @@ exports.updateEvent = async (req, res) => {
   }
 };
 
-// Delete event
+// Delete/cancel event
 exports.deleteEvent = async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
@@ -192,60 +204,12 @@ exports.deleteEvent = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // Soft delete - mark as cancelled instead of deleting
-    event.status = "cancelled";
-    await event.save();
+    // Permanently delete the event
+    await Event.findByIdAndDelete(req.params.id);
 
-    res.json({ message: "Event cancelled successfully" });
+    res.json({ message: "Event deleted successfully" });
   } catch (error) {
     console.error("Delete event error:", error);
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Register a participant (for user app)
-exports.registerForEvent = async (req, res) => {
-  try {
-    const event = await Event.findById(req.params.id);
-
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
-
-    if (event.status !== "upcoming") {
-      return res
-        .status(400)
-        .json({ message: "Event is not accepting registrations" });
-    }
-
-    if (
-      event.maxParticipants > 0 &&
-      event.registeredParticipants.length >= event.maxParticipants
-    ) {
-      return res.status(400).json({ message: "Event is full" });
-    }
-
-    // Check if already registered
-    const alreadyRegistered = event.registeredParticipants.some(
-      (p) => p.userId.toString() === req.user.id,
-    );
-
-    if (alreadyRegistered) {
-      return res
-        .status(400)
-        .json({ message: "Already registered for this event" });
-    }
-
-    event.registeredParticipants.push({
-      userId: req.user.id,
-      paymentStatus: event.entryFee > 0 ? "pending" : "completed",
-    });
-
-    await event.save();
-
-    res.json({ message: "Successfully registered for event", event });
-  } catch (error) {
-    console.error("Register for event error:", error);
     res.status(500).json({ message: error.message });
   }
 };
