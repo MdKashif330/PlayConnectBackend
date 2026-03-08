@@ -13,6 +13,12 @@ const courtSchema = new mongoose.Schema(
       required: true,
     },
 
+    images: [
+      {
+        type: String,
+      },
+    ],
+
     sportType: {
       type: String,
       required: true,

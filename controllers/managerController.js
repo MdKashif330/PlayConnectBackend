@@ -1,18 +1,32 @@
 const Venue = require("../models/Venue");
 const Booking = require("../models/Booking");
 const Court = require("../models/Court");
+const fs = require("fs");
+const path = require("path");
 
 // CREATE VENUE (Manager)
 exports.createVenue = async (req, res) => {
   try {
-    const { name, description, address, location, facilities } = req.body;
+    const {
+      name,
+      description,
+      address,
+      selectedLocation,
+      location,
+      facilities,
+      images,
+    } = req.body;
+
+    console.log("Creating venue with images:", images);
 
     const venue = await Venue.create({
       name,
       description: description || "",
       address: address || "",
+      selectedLocation: selectedLocation || "",
       location,
       facilities,
+      images: images || [],
       manager: req.user.id,
     });
 
@@ -21,6 +35,7 @@ exports.createVenue = async (req, res) => {
       venue,
     });
   } catch (error) {
+    console.error("Create venue error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -36,6 +51,7 @@ exports.createCourt = async (req, res) => {
       pricePerSlot,
       paymentMethods,
       accountDetails,
+      images,
     } = req.body;
 
     const court = await Court.create({
@@ -46,6 +62,7 @@ exports.createCourt = async (req, res) => {
       pricePerSlot,
       paymentMethods: paymentMethods || ["cash"],
       accountDetails: accountDetails || {},
+      images: images || [],
     });
 
     res.status(201).json({
@@ -53,7 +70,6 @@ exports.createCourt = async (req, res) => {
       court,
     });
   } catch (error) {
-    console.error("Create court error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -89,16 +105,6 @@ exports.getManagerVenues = async (req, res) => {
   try {
     const venues = await Venue.find({ manager: req.user.id });
     res.json(venues);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// GET all courts (manager)
-exports.getCourts = async (req, res) => {
-  try {
-    const courts = await Court.find();
-    res.json(courts);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -246,11 +252,21 @@ exports.deleteCourt = async (req, res) => {
   }
 };
 
-// Update venue
+// UPDATE VENUE
 exports.updateVenue = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, address, location, facilities } = req.body;
+    const {
+      name,
+      description,
+      address,
+      selectedLocation,
+      location,
+      facilities,
+      images,
+    } = req.body;
+
+    console.log("Updating venue with images:", images);
 
     const venue = await Venue.findOne({
       _id: id,
@@ -264,6 +280,8 @@ exports.updateVenue = async (req, res) => {
     if (name) venue.name = name;
     if (description !== undefined) venue.description = description;
     if (address !== undefined) venue.address = address;
+    if (selectedLocation !== undefined)
+      venue.selectedLocation = selectedLocation;
     if (location) {
       venue.location = {
         address: location.address || venue.location?.address,
@@ -280,10 +298,12 @@ exports.updateVenue = async (req, res) => {
         sportsGoods: facilities.sportsGoods ?? venue.facilities?.sportsGoods,
       };
     }
+    if (images) venue.images = images;
 
     const updatedVenue = await venue.save();
     res.json(updatedVenue);
   } catch (error) {
+    console.error("Update venue error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -299,6 +319,7 @@ exports.updateCourt = async (req, res) => {
       pricePerSlot,
       paymentMethods,
       accountDetails,
+      images,
     } = req.body;
 
     const court = await Court.findById(id).populate("venue");
@@ -325,11 +346,10 @@ exports.updateCourt = async (req, res) => {
     if (paymentMethods) court.paymentMethods = paymentMethods;
     if (accountDetails)
       court.accountDetails = { ...court.accountDetails, ...accountDetails };
-
+    if (images) court.images = images; // Update images
     const updatedCourt = await court.save();
     res.json(updatedCourt);
   } catch (error) {
-    console.error("Update court error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -361,6 +381,44 @@ exports.deleteVenue = async (req, res) => {
     res.json({ message: "Venue deleted successfully" });
   } catch (error) {
     console.error("Delete venue error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Upload court image
+exports.uploadCourtImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No image file provided" });
+    }
+
+    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/courts/${req.file.filename}`;
+
+    res.json({
+      message: "Image uploaded successfully",
+      imageUrl: imageUrl,
+    });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Upload venue image
+exports.uploadVenueImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No image file provided" });
+    }
+
+    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/venues/${req.file.filename}`;
+
+    res.json({
+      message: "Image uploaded successfully",
+      imageUrl: imageUrl,
+    });
+  } catch (error) {
+    console.error("Upload error:", error);
     res.status(500).json({ message: error.message });
   }
 };

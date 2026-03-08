@@ -9,6 +9,7 @@ const paymentMethodRoutes = require("./routes/paymentMethodRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const vacationRoutes = require("./routes/vacationRoutes");
 const eventRoutes = require("./routes/eventRoutes");
+const path = require("path");
 
 const app = express();
 const PORT = 5000;
@@ -43,6 +44,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/courts", require("./routes/courtRoutes"));
 app.use("/api/vacations", vacationRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Test route
 app.get("/", (req, res) => {

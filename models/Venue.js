@@ -10,6 +10,11 @@ const venueSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    images: [
+      {
+        type: String,
+      },
+    ],
     address: {
       type: String,
       default: "",
