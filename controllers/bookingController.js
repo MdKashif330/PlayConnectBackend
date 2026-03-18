@@ -384,6 +384,83 @@ const getManagerBookingsByDate = async (req, res) => {
   }
 };
 
+const getBookedDates = async (req, res) => {
+  try {
+    const { month, venueId } = req.query;
+
+    let query = {};
+
+    // If user is logged in, get their bookings
+    if (req.user) {
+      query.user = req.user.id;
+    }
+
+    // If venueId is provided, filter by venue
+    if (venueId) {
+      query.venue = venueId;
+    }
+
+    // If month is provided (format: YYYY-MM)
+    if (month) {
+      const [year, monthNum] = month.split("-");
+      const startDate = new Date(Date.UTC(year, monthNum - 1, 1));
+      const endDate = new Date(Date.UTC(year, monthNum, 1));
+
+      const startDateStr = startDate.toISOString().split("T")[0];
+      const endDateStr = endDate.toISOString().split("T")[0];
+
+      query.date = {
+        $gte: startDateStr,
+        $lt: endDateStr,
+      };
+    }
+
+    const bookings = await Booking.find(query).select("date status").lean();
+
+    // Format dates for calendar
+    const bookedDates = {};
+    bookings.forEach((booking) => {
+      bookedDates[booking.date] = {
+        marked: true,
+        dotColor: booking.status === "CONFIRMED" ? "#2E7D32" : "#FFC107",
+        status: booking.status,
+      };
+    });
+
+    res.json(bookedDates);
+  } catch (error) {
+    console.error("Error getting booked dates:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getBookingById = async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id)
+      .populate("venue", "name location.address images phone")
+      .populate("court", "name sportType pricePerSlot")
+      .populate("user", "name email phone");
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if the booking belongs to the user or user is manager/admin
+    if (
+      booking.user._id.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const formattedBooking = formatBookingDisplay(booking);
+    res.json(formattedBooking);
+  } catch (error) {
+    console.error("Error fetching booking:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ==================== EXPORT ALL FUNCTIONS ====================
 
 module.exports = {
@@ -391,6 +468,8 @@ module.exports = {
   createBooking,
   getUserBookings,
   simulatePayment,
+  getBookedDates,
+  getBookingById,
 
   // Manager functions
   getManagerFutureBookingsByStatus,

@@ -11,6 +11,9 @@ const vacationRoutes = require("./routes/vacationRoutes");
 const eventRoutes = require("./routes/eventRoutes");
 const path = require("path");
 
+const publicVenueRoutes = require("./routes/publicVenueRoutes");
+const userRoutes = require("./routes/userRoutes");
+
 const app = express();
 const PORT = 5000;
 
@@ -45,6 +48,9 @@ app.use("/api/courts", require("./routes/courtRoutes"));
 app.use("/api/vacations", vacationRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.use("/api/venues", publicVenueRoutes);
+app.use("/api/users", userRoutes);
 
 // Test route
 app.get("/", (req, res) => {

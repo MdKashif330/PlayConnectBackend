@@ -4,6 +4,36 @@ const Vacation = require("../models/Vacation");
 const Venue = require("../models/Venue");
 const { protect, managerOnly } = require("../middleware/authMiddleware");
 
+router.get("/check", async (req, res) => {
+  try {
+    const { venueId, date } = req.query;
+
+    if (!venueId || !date) {
+      return res.status(400).json({
+        message: "venueId and date are required",
+      });
+    }
+
+    // Convert date string to Date object
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    const vacation = await Vacation.findOne({
+      venue: venueId,
+      startDate: { $lte: checkDate },
+      endDate: { $gte: checkDate },
+    });
+
+    res.json({
+      isVacation: !!vacation,
+      vacation: vacation || null,
+    });
+  } catch (error) {
+    console.error("Error checking vacation:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // GET vacations for a venue
 router.get("/venue/:venueId", protect, managerOnly, async (req, res) => {
   try {

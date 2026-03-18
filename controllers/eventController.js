@@ -2,6 +2,216 @@ const Event = require("../models/Event");
 const Court = require("../models/Court");
 const Venue = require("../models/Venue");
 
+// ============ PUBLIC/USER FUNCTIONS ============
+
+// @desc    Get all upcoming public events
+// @route   GET /api/events/public
+// @access  Public
+exports.getAllPublicEvents = async (req, res) => {
+  try {
+    const { limit = 20, sport, venue } = req.query;
+
+    // Build query - only upcoming events
+    let query = {
+      status: { $in: ["upcoming", "ongoing"] },
+      startDate: { $gte: new Date() },
+    };
+
+    // Filter by venue if provided
+    if (venue) {
+      query.venue = venue;
+    }
+
+    const events = await Event.find(query)
+      .populate("venue", "name location.address images")
+      .populate("courts", "name sportType")
+      .populate("createdBy", "name")
+      .limit(parseInt(limit))
+      .sort({ startDate: 1 }); // Sort by soonest first
+
+    // Add participant counts
+    const eventsWithDetails = events.map((event) => {
+      const eventObj = event.toObject();
+      return {
+        ...eventObj,
+        currentParticipants: event.registeredParticipants?.length || 0,
+        spotsLeft:
+          event.maxParticipants - (event.registeredParticipants?.length || 0),
+        isFull: event.registeredParticipants?.length >= event.maxParticipants,
+      };
+    });
+
+    res.json(eventsWithDetails);
+  } catch (error) {
+    console.error("Get public events error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get public event details by ID
+// @route   GET /api/events/public/:id
+// @access  Public
+exports.getPublicEventById = async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      _id: req.params.id,
+      status: { $in: ["upcoming", "ongoing"] },
+    })
+      .populate("venue", "name location.address phone images")
+      .populate("courts", "name sportType pricePerSlot images")
+      .populate("createdBy", "name email phone");
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    const eventDetails = {
+      ...event.toObject(),
+      currentParticipants: event.registeredParticipants?.length || 0,
+      spotsLeft:
+        event.maxParticipants - (event.registeredParticipants?.length || 0),
+      isFull: event.registeredParticipants?.length >= event.maxParticipants,
+    };
+
+    res.json(eventDetails);
+  } catch (error) {
+    console.error("Get public event error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Register user for an event
+// @route   POST /api/events/:id/register
+// @access  Private
+exports.registerForEvent = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id);
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    if (!["upcoming", "ongoing"].includes(event.status)) {
+      return res
+        .status(400)
+        .json({ message: "Event is not available for registration" });
+    }
+
+    // Check if event is already full
+    if (
+      event.registeredParticipants &&
+      event.registeredParticipants.length >= event.maxParticipants
+    ) {
+      return res.status(400).json({ message: "Event is already full" });
+    }
+
+    // Check if user is already registered
+    const alreadyRegistered = event.registeredParticipants?.some(
+      (p) => p.userId && p.userId.toString() === req.user.id,
+    );
+
+    if (alreadyRegistered) {
+      return res
+        .status(400)
+        .json({ message: "Already registered for this event" });
+    }
+
+    // Add user to registeredParticipants
+    if (!event.registeredParticipants) {
+      event.registeredParticipants = [];
+    }
+
+    event.registeredParticipants.push({
+      userId: req.user.id,
+      registeredAt: new Date(),
+      paymentStatus: event.entryFee > 0 ? "pending" : "completed", // If free, mark as completed
+    });
+
+    await event.save();
+
+    res.json({
+      message:
+        event.entryFee > 0
+          ? "Registration successful! Please complete payment."
+          : "Successfully registered for event",
+      currentParticipants: event.registeredParticipants.length,
+    });
+  } catch (error) {
+    console.error("Register for event error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Cancel event registration
+// @route   DELETE /api/events/:id/register
+// @access  Private
+exports.cancelEventRegistration = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id);
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    // Check if user is registered
+    const participantIndex = event.registeredParticipants?.findIndex(
+      (p) => p.userId && p.userId.toString() === req.user.id,
+    );
+
+    if (participantIndex === -1 || participantIndex === undefined) {
+      return res.status(400).json({ message: "Not registered for this event" });
+    }
+
+    // Remove user from registeredParticipants
+    event.registeredParticipants.splice(participantIndex, 1);
+    await event.save();
+
+    res.json({
+      message: "Registration cancelled successfully",
+      currentParticipants: event.registeredParticipants.length,
+    });
+  } catch (error) {
+    console.error("Cancel registration error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get user's registered events
+// @route   GET /api/events/user/registered
+// @access  Private
+exports.getUserRegisteredEvents = async (req, res) => {
+  try {
+    const events = await Event.find({
+      "registeredParticipants.userId": req.user.id,
+      status: { $in: ["upcoming", "ongoing"] },
+    })
+      .populate("venue", "name location.address")
+      .populate("courts", "name sportType")
+      .sort({ startDate: 1 });
+
+    // Add registration details for each event
+    const eventsWithDetails = events.map((event) => {
+      const eventObj = event.toObject();
+      const userRegistration = event.registeredParticipants.find(
+        (p) => p.userId && p.userId.toString() === req.user.id,
+      );
+
+      return {
+        ...eventObj,
+        currentParticipants: event.registeredParticipants?.length || 0,
+        userRegistration,
+      };
+    });
+
+    res.json(eventsWithDetails);
+  } catch (error) {
+    console.error("Get user events error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============ MANAGER FUNCTIONS ============
+
 // Create a new event
 exports.createEvent = async (req, res) => {
   try {
@@ -118,7 +328,7 @@ exports.getManagerEvents = async (req, res) => {
   }
 };
 
-// Get single event details
+// Get single event details (for manager)
 exports.getEventById = async (req, res) => {
   try {
     const event = await Event.findById(req.params.id)

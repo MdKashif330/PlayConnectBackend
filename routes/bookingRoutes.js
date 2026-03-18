@@ -7,6 +7,8 @@ const { protect, managerOnly } = require("../middleware/authMiddleware");
 router.post("/", protect, bookingController.createBooking);
 router.post("/simulate-payment", protect, bookingController.simulatePayment);
 router.get("/user", protect, bookingController.getUserBookings);
+router.get("/dates", protect, bookingController.getBookedDates);
+router.get("/:id", protect, bookingController.getBookingById); // 👈 ADD THIS LINE
 
 // Manager routes
 router.get(
