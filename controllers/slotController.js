@@ -76,3 +76,28 @@ exports.bookSlot = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+exports.getAvailableSlots = async (req, res) => {
+  try {
+    const { courtId, date } = req.query;
+
+    if (!courtId || !date) {
+      return res.status(400).json({
+        message: "courtId and date are required",
+      });
+    }
+
+    const slots = await Slot.find({
+      court: courtId,
+      date,
+      isBooked: true,
+    }).sort({ startTime: 1 });
+
+    res.status(200).json({
+      message: "Booked slots fetched successfully",
+      slots,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
