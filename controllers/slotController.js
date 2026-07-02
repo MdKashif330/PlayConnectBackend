@@ -13,6 +13,7 @@ exports.createSlot = async (req, res) => {
       date,
       startTime,
       endTime,
+      isBooked: false, // Explicitly set to false
     });
 
     res.status(201).json({
@@ -24,6 +25,7 @@ exports.createSlot = async (req, res) => {
   }
 };
 
+// Only ONE getAvailableSlots function - returning BOOKED slots
 exports.getAvailableSlots = async (req, res) => {
   try {
     const { courtId, date } = req.query;
@@ -34,17 +36,23 @@ exports.getAvailableSlots = async (req, res) => {
       });
     }
 
+    // Return BOOKED slots (isBooked: true)
     const slots = await Slot.find({
       court: courtId,
       date,
-      isBooked: false,
+      isBooked: true,
     }).sort({ startTime: 1 });
 
+    console.log(
+      `📅 Found ${slots.length} booked slots for court ${courtId} on ${date}`,
+    );
+
     res.status(200).json({
-      message: "Available slots fetched successfully",
+      message: "Booked slots fetched successfully",
       slots,
     });
   } catch (error) {
+    console.error("Error fetching booked slots:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -71,31 +79,6 @@ exports.bookSlot = async (req, res) => {
     res.status(200).json({
       message: "Slot booked successfully",
       slot,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-exports.getAvailableSlots = async (req, res) => {
-  try {
-    const { courtId, date } = req.query;
-
-    if (!courtId || !date) {
-      return res.status(400).json({
-        message: "courtId and date are required",
-      });
-    }
-
-    const slots = await Slot.find({
-      court: courtId,
-      date,
-      isBooked: true,
-    }).sort({ startTime: 1 });
-
-    res.status(200).json({
-      message: "Booked slots fetched successfully",
-      slots,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

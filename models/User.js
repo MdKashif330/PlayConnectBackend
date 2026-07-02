@@ -20,6 +20,20 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "manager", "user"],
       default: "user",
     },
+    location: {
+      latitude: {
+        type: Number,
+        default: null,
+      },
+      longitude: {
+        type: Number,
+        default: null,
+      },
+    },
+    lastLocationUpdate: {
+      type: Date,
+      default: null,
+    },
     isApproved: {
       type: Boolean,
       default: false,

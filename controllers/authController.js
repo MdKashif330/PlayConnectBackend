@@ -2,7 +2,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// REGISTER
+// REGISTER - All new accounts require admin approval
 exports.register = async (req, res) => {
   try {
     const { name, email, password, role = "user" } = req.body;
@@ -15,28 +15,27 @@ exports.register = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // All registrations require admin approval
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
-      isApproved: role === "user" || role === "admin",
+      isApproved: false,
     });
 
-    let message = "User registered successfully.";
+    let message = "Registration successful. Await admin approval.";
     if (role === "manager") {
       message = "Manager registered successfully. Await admin approval.";
     }
 
-    res.status(201).json({
-      message,
-    });
+    res.status(201).json({ message });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// LOGIN
+// LOGIN - Block all non-approved accounts (except admin)
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -46,7 +45,8 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (user.role === "manager" && !user.isApproved) {
+    // Check approval for all non-admin users
+    if (user.role !== "admin" && !user.isApproved) {
       return res.status(403).json({ message: "Account not approved by admin" });
     }
 
@@ -135,23 +135,19 @@ exports.changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    // Find user with password
     const user = await User.findById(userId).select("+password");
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Current password is incorrect" });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // Update password
     user.password = hashedPassword;
     await user.save();
 
@@ -166,7 +162,6 @@ exports.changePassword = async (req, res) => {
 exports.deleteAccount = async (req, res) => {
   try {
     const userId = req.user.id;
-
     await User.findByIdAndDelete(userId);
     res.json({ message: "Account deleted successfully" });
   } catch (error) {

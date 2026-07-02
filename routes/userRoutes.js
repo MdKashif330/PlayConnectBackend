@@ -7,6 +7,7 @@ const {
   addFavorite,
   removeFavorite,
   getFavorites,
+  updateUserLocation,
 } = require("../controllers/userController");
 
 // Profile routes
@@ -17,5 +18,8 @@ router.put("/profile", protect, updateUserProfile);
 router.get("/favorites", protect, getFavorites);
 router.post("/favorites/:venueId", protect, addFavorite);
 router.delete("/favorites/:venueId", protect, removeFavorite);
+
+// Location routes
+router.post("/location", protect, updateUserLocation);
 
 module.exports = router;

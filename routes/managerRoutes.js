@@ -24,10 +24,9 @@ const {
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadPath =
-      file.fieldname === "image" && req.baseUrl.includes("courts")
-        ? "uploads/courts/"
-        : "uploads/venues/";
+    // Check the route path instead of baseUrl
+    const isCourtRoute = req.route && req.route.path === "/courts/upload-image";
+    const uploadPath = isCourtRoute ? "uploads/courts/" : "uploads/venues/";
 
     const fs = require("fs");
     if (!fs.existsSync(uploadPath)) {
@@ -38,7 +37,8 @@ const storage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const prefix = req.baseUrl.includes("courts") ? "court" : "venue";
+    const isCourtRoute = req.route && req.route.path === "/courts/upload-image";
+    const prefix = isCourtRoute ? "court" : "venue";
     cb(null, prefix + "-" + uniqueSuffix + path.extname(file.originalname));
   },
 });

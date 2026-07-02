@@ -1,6 +1,7 @@
 const Booking = require("../models/Booking");
 const Court = require("../models/Court");
 const Venue = require("../models/Venue");
+const Slot = require("../models/Slot");
 
 // Helper function to format booking display
 const formatBookingDisplay = (booking) => {
@@ -30,7 +31,8 @@ const formatBookingDisplay = (booking) => {
 
 const createBooking = async (req, res) => {
   try {
-    const { courtId, date, slot, slots, startDate, endDate } = req.body;
+    const { courtId, date, slot, slots, startDate, endDate, paymentMethod } =
+      req.body;
 
     let slotsArray = [];
     if (slots && Array.isArray(slots)) {
@@ -92,6 +94,7 @@ const createBooking = async (req, res) => {
       totalSlots: slotsArray.length,
       totalPrice: court.pricePerSlot * slotsArray.length,
       status: "PENDING",
+      paymentMethod: paymentMethod || "cash", // Add this line
     };
 
     if (startDate && endDate) {
@@ -100,6 +103,43 @@ const createBooking = async (req, res) => {
     }
 
     const booking = await Booking.create(bookingData);
+
+    // ========== CREATE/UPDATE SLOT RECORDS ==========
+    for (const slotItem of slotsArray) {
+      const [startTime, endTime] = slotItem.split("-").map((s) => s.trim());
+      const slotDate = startDate || date;
+
+      // Check if slot already exists
+      let existingSlot = await Slot.findOne({
+        court: courtId,
+        date: slotDate,
+        startTime: startTime,
+        endTime: endTime,
+      });
+
+      if (existingSlot) {
+        // Update existing slot to booked
+        existingSlot.isBooked = true;
+        existingSlot.bookedBy = req.user._id;
+        existingSlot.price = court.pricePerSlot;
+        await existingSlot.save();
+        console.log(`✅ Updated existing slot: ${slotItem}`);
+      } else {
+        // Create new slot record
+        await Slot.create({
+          court: courtId,
+          date: slotDate,
+          startTime: startTime,
+          endTime: endTime,
+          price: court.pricePerSlot,
+          isBooked: true,
+          bookedBy: req.user._id,
+        });
+        console.log(`✅ Created new slot record: ${slotItem}`);
+      }
+    }
+    // ========== END SLOT CREATION ==========
+
     const formattedBooking = formatBookingDisplay(booking);
 
     const message =
@@ -120,7 +160,7 @@ const createBooking = async (req, res) => {
 const getUserBookings = async (req, res) => {
   try {
     const bookings = await Booking.find({ user: req.user.id })
-      .populate("venue", "name location.address")
+      .populate("venue", "name location.address images")
       .populate("court", "name sportType pricePerSlot")
       .sort({ createdAt: -1 });
 
@@ -161,12 +201,388 @@ const simulatePayment = async (req, res) => {
   }
 };
 
+// ==================== USER PAYMENT FUNCTIONS ====================
+
+// Get payment methods for a booking
+const getPaymentMethodsForBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const booking = await Booking.findById(id).populate("court");
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if booking belongs to user
+    if (booking.user.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    res.json({
+      paymentMethods: booking.court.paymentMethods || ["cash"],
+      accountDetails: booking.court.accountDetails || {},
+    });
+  } catch (error) {
+    console.error("Error getting payment methods:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// User submits payment proof
+// User submits payment proof
+const submitPaymentProof = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paymentMethod, transactionId } = req.body;
+
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if booking belongs to user
+    if (booking.user.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    // Allow both AWAITING_PAYMENT and PAYMENT_SUBMITTED status
+    if (
+      booking.status !== "AWAITING_PAYMENT" &&
+      booking.status !== "PAYMENT_SUBMITTED"
+    ) {
+      return res
+        .status(400)
+        .json({ message: "Payment not requested for this booking" });
+    }
+
+    // Handle file upload
+    const paymentProof = req.file ? req.file.path : null;
+
+    booking.paymentMethod = paymentMethod;
+    booking.paymentProof = paymentProof;
+    booking.paymentProofUploadedAt = new Date();
+    if (transactionId) {
+      booking.transactionId = transactionId;
+    }
+    // Keep status as PAYMENT_SUBMITTED (don't change)
+    // booking.status remains "PAYMENT_SUBMITTED"
+
+    await booking.save();
+
+    res.json({
+      message:
+        "Payment proof submitted successfully. Waiting for manager verification.",
+      booking,
+    });
+  } catch (error) {
+    console.error("Error submitting payment proof:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// User cancels booking
+const cancelUserBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if booking belongs to user
+    if (booking.user.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (booking.status !== "PENDING" && booking.status !== "AWAITING_PAYMENT") {
+      return res.status(400).json({ message: "Cannot cancel this booking" });
+    }
+
+    booking.status = "CANCELLED";
+    await booking.save();
+
+    // FREE UP THE SLOTS - Make them available again
+    const Slot = require("../models/Slot");
+
+    for (const slot of booking.slots) {
+      await Slot.updateOne(
+        {
+          court: booking.court,
+          date: booking.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        },
+        { isBooked: false, bookedBy: null },
+      );
+      console.log(
+        `✅ Slot ${slot.startTime}-${slot.endTime} freed up for court ${booking.court}`,
+      );
+    }
+
+    res.json({
+      message: "Booking cancelled successfully. Slots are now available again.",
+      booking,
+    });
+  } catch (error) {
+    console.error("Error cancelling booking:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ==================== MANAGER PAYMENT FUNCTIONS ====================
+
+// Manager requests payment from user
+const requestPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paymentRequestNote } = req.body;
+
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if manager owns this booking's venue
+    const venue = await Venue.findOne({
+      _id: booking.venue,
+      manager: req.user.id,
+    });
+
+    if (!venue) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (booking.status !== "PENDING") {
+      return res
+        .status(400)
+        .json({ message: "Booking cannot be requested for payment" });
+    }
+
+    booking.status = "PAYMENT_SUBMITTED";
+    booking.managerNotes =
+      paymentRequestNote || "Please complete payment to confirm your booking.";
+
+    await booking.save();
+
+    res.json({
+      message: "Payment requested successfully",
+      booking,
+    });
+  } catch (error) {
+    console.error("Error requesting payment:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Manager rejects booking
+const rejectBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rejectionReason } = req.body;
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    // Check if manager owns this booking's venue
+    const venue = await Venue.findOne({
+      _id: booking.venue,
+      manager: req.user.id,
+    });
+
+    if (!venue) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    booking.status = "REJECTED";
+    booking.managerNotes = rejectionReason || "Booking rejected";
+
+    await booking.save();
+
+    // FREE UP THE SLOTS - Make them available again
+    const Slot = require("../models/Slot");
+
+    for (const slot of booking.slots) {
+      const result = await Slot.updateOne(
+        {
+          court: booking.court,
+          date: booking.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        },
+        { isBooked: false, bookedBy: null },
+      );
+    }
+
+    res.json({
+      message: "Booking rejected. Slots are now available again.",
+      booking,
+    });
+  } catch (error) {
+    console.error("Error rejecting booking:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Manager verifies payment and confirms booking
+const verifyPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isApproved, rejectionReason } = req.body;
+
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if manager owns this booking's venue
+    const venue = await Venue.findOne({
+      _id: booking.venue,
+      manager: req.user.id,
+    });
+
+    if (!venue) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized - You don't own this venue" });
+    }
+
+    if (booking.status !== "PAYMENT_SUBMITTED") {
+      return res
+        .status(400)
+        .json({ message: "No payment proof submitted for this booking" });
+    }
+
+    if (isApproved) {
+      booking.status = "CONFIRMED";
+    } else {
+      booking.status = "REJECTED";
+      booking.paymentRejectionReason =
+        rejectionReason || "Payment verification failed";
+
+      // FREE UP THE SLOTS when payment is rejected
+      const Slot = require("../models/Slot");
+
+      for (const slot of booking.slots) {
+        await Slot.updateOne(
+          {
+            court: booking.court,
+            date: booking.date,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+          },
+          { isBooked: false, bookedBy: null },
+        );
+        console.log(
+          `✅ Slot ${slot.startTime}-${slot.endTime} freed up for court ${booking.court}`,
+        );
+      }
+    }
+
+    await booking.save();
+
+    res.json({
+      message: isApproved
+        ? "Payment verified, booking confirmed"
+        : "Payment rejected. Slots are now available again.",
+      booking,
+    });
+  } catch (error) {
+    console.error("Error verifying payment:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ==================== MANAGER UPDATE BOOKING STATUS (NEW) ====================
+
+// Manager updates booking status directly (Unified endpoint)
+const updateBookingStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    const booking = await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if manager owns this booking's venue
+    const venue = await Venue.findOne({
+      _id: booking.venue,
+      manager: req.user.id,
+    });
+
+    if (!venue) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    // Valid status transitions
+    const validStatuses = [
+      "PENDING",
+      "PAYMENT_SUBMITTED",
+      "CONFIRMED",
+      "REJECTED",
+      "CANCELLED",
+    ];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    booking.status = status;
+    if (notes) {
+      booking.managerNotes = notes;
+    }
+
+    await booking.save();
+
+    // If status is REJECTED or CANCELLED, free up the slots
+    if (status === "REJECTED" || status === "CANCELLED") {
+      const Slot = require("../models/Slot");
+
+      for (const slot of booking.slots) {
+        const result = await Slot.updateOne(
+          {
+            court: booking.court,
+            date: booking.date,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+          },
+          { isBooked: false, bookedBy: null },
+        );
+        console.log(
+          `✅ Slot ${slot.startTime}-${slot.endTime} freed up. Result:`,
+          result,
+        );
+      }
+    }
+
+    console.log(`✅ Booking ${id} status updated to ${status}`);
+
+    res.json({
+      message: `Booking status updated to ${status}`,
+      booking,
+    });
+  } catch (error) {
+    console.error("Error updating booking status:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ==================== MANAGER BOOKING FUNCTIONS ====================
 
 const getManagerFutureBookingsByStatus = async (req, res) => {
   try {
     const { status } = req.params;
     const managerId = req.user.id;
+
+    console.log("🔍 Fetching bookings with status:", status);
 
     const venues = await Venue.find({ manager: managerId });
     const venueIds = venues.map((v) => v._id);
@@ -183,34 +599,51 @@ const getManagerFutureBookingsByStatus = async (req, res) => {
       minute: "2-digit",
     });
 
+    const statusUpper = status.toUpperCase();
+
+    const futureStatuses = [
+      "PENDING",
+      "AWAITING_PAYMENT",
+      "PAYMENT_SUBMITTED",
+      "CONFIRMED",
+    ];
+    const isFutureStatus = futureStatuses.includes(statusUpper);
+
     const allBookings = await Booking.find({
       venue: { $in: venueIds },
-      status: status.toUpperCase(),
+      status: statusUpper,
     })
       .populate("venue", "name")
       .populate("court", "name")
-      .populate("user", "name email")
+      .populate("user", "name email phone")
       .sort({ date: 1 });
 
-    const futureBookings = allBookings.filter((booking) => {
-      const bookingDate = booking.startDate || booking.date;
-      const date = new Date(bookingDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+    console.log(
+      `📊 Found ${allBookings.length} bookings with status ${statusUpper}`,
+    );
 
-      if (date > today) return true;
-      if (date.getTime() === today.getTime()) {
-        // Get last slot end time
-        const lastSlot =
-          booking.slots && booking.slots.length > 0
-            ? booking.slots[booking.slots.length - 1].endTime
-            : booking.endTime;
-        return lastSlot >= currentTime;
-      }
-      return false;
-    });
+    let filteredBookings = allBookings;
 
-    const formattedBookings = futureBookings.map((booking) =>
+    if (isFutureStatus) {
+      filteredBookings = allBookings.filter((booking) => {
+        const bookingDate = booking.startDate || booking.date;
+        const date = new Date(bookingDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (date > today) return true;
+        if (date.getTime() === today.getTime()) {
+          const lastSlot =
+            booking.slots && booking.slots.length > 0
+              ? booking.slots[booking.slots.length - 1].endTime
+              : booking.endTime;
+          return lastSlot >= currentTime;
+        }
+        return false;
+      });
+    }
+
+    const formattedBookings = filteredBookings.map((booking) =>
       formatBookingDisplay(booking),
     );
 
@@ -390,17 +823,14 @@ const getBookedDates = async (req, res) => {
 
     let query = {};
 
-    // If user is logged in, get their bookings
     if (req.user) {
       query.user = req.user.id;
     }
 
-    // If venueId is provided, filter by venue
     if (venueId) {
       query.venue = venueId;
     }
 
-    // If month is provided (format: YYYY-MM)
     if (month) {
       const [year, monthNum] = month.split("-");
       const startDate = new Date(Date.UTC(year, monthNum - 1, 1));
@@ -417,7 +847,6 @@ const getBookedDates = async (req, res) => {
 
     const bookings = await Booking.find(query).select("date status").lean();
 
-    // Format dates for calendar
     const bookedDates = {};
     bookings.forEach((booking) => {
       bookedDates[booking.date] = {
@@ -436,6 +865,10 @@ const getBookedDates = async (req, res) => {
 
 const getBookingById = async (req, res) => {
   try {
+    // console.log("🔍 getBookingById called for booking:", req.params.id);
+    // console.log("🔍 User ID:", req.user.id);
+    // console.log("🔍 User role:", req.user.role);
+
     const booking = await Booking.findById(req.params.id)
       .populate("venue", "name location.address images phone")
       .populate("court", "name sportType pricePerSlot")
@@ -445,11 +878,37 @@ const getBookingById = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // Check if the booking belongs to the user or user is manager/admin
-    if (
-      booking.user._id.toString() !== req.user.id &&
-      req.user.role !== "admin"
-    ) {
+    // console.log("🔍 Booking venue ID:", booking.venue?._id);
+    // console.log("🔍 Booking user ID:", booking.user?._id);
+
+    // Allow if:
+    // 1. User owns the booking (user role)
+    // 2. User is admin
+    // 3. User is manager who owns the venue
+    let isAuthorized = false;
+
+    // Check if user owns the booking
+    if (booking.user._id.toString() === req.user.id) {
+      isAuthorized = true;
+    }
+
+    // Check if user is admin
+    if (req.user.role === "admin") {
+      isAuthorized = true;
+    }
+
+    // Check if user is manager who owns the venue
+    if (req.user.role === "manager") {
+      const venue = await Venue.findOne({
+        _id: booking.venue,
+        manager: req.user.id,
+      });
+      if (venue) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
@@ -470,6 +929,9 @@ module.exports = {
   simulatePayment,
   getBookedDates,
   getBookingById,
+  getPaymentMethodsForBooking,
+  submitPaymentProof,
+  cancelUserBooking,
 
   // Manager functions
   getManagerFutureBookingsByStatus,
@@ -477,4 +939,8 @@ module.exports = {
   getManagerReservations,
   getManagerDashboardStats,
   getManagerBookingsByDate,
+  requestPayment,
+  rejectBooking,
+  verifyPayment,
+  updateBookingStatus,
 };

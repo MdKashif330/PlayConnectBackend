@@ -4,6 +4,7 @@ const Vacation = require("../models/Vacation");
 const Venue = require("../models/Venue");
 const { protect, managerOnly } = require("../middleware/authMiddleware");
 
+// PUBLIC ROUTE - Check if a date is a vacation (no auth required)
 router.get("/check", async (req, res) => {
   try {
     const { venueId, date } = req.query;
@@ -14,14 +15,18 @@ router.get("/check", async (req, res) => {
       });
     }
 
-    // Convert date string to Date object
-    const checkDate = new Date(date);
-    checkDate.setHours(0, 0, 0, 0);
+    // Create date range for the entire day (00:00:00 to 23:59:59)
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
 
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Find vacation where the date falls within the range
     const vacation = await Vacation.findOne({
       venue: venueId,
-      startDate: { $lte: checkDate },
-      endDate: { $gte: checkDate },
+      startDate: { $lte: endOfDay },
+      endDate: { $gte: startOfDay },
     });
 
     res.json({
@@ -80,15 +85,10 @@ router.get("/", protect, managerOnly, async (req, res) => {
 // POST create vacation
 router.post("/", protect, managerOnly, async (req, res) => {
   try {
-    console.log("=== VACATION CREATE REQUEST ===");
-    console.log("User ID:", req.user?.id);
-    console.log("Request body:", req.body);
-
     const { venueId, startDate, endDate, reason } = req.body;
 
     // Validation - Check all fields
     if (!venueId || !startDate || !endDate || !reason) {
-      console.log("Validation failed - missing fields");
       return res.status(400).json({
         message: "Please provide venueId, startDate, endDate, and reason",
       });
@@ -97,9 +97,6 @@ router.post("/", protect, managerOnly, async (req, res) => {
     // Convert to Date objects
     const start = new Date(startDate);
     const end = new Date(endDate);
-
-    console.log("Parsed start date:", start);
-    console.log("Parsed end date:", end);
 
     // Date validation
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
@@ -122,18 +119,14 @@ router.post("/", protect, managerOnly, async (req, res) => {
     }
 
     // Check if venue belongs to manager
-    console.log("Checking venue:", venueId);
     const venue = await Venue.findOne({
       _id: venueId,
       manager: req.user.id,
     });
 
     if (!venue) {
-      console.log("Venue not found or not owned by manager");
       return res.status(404).json({ message: "Venue not found" });
     }
-
-    console.log("Venue found:", venue.name);
 
     // Create vacation with Date objects
     const vacation = new Vacation({
@@ -144,16 +137,11 @@ router.post("/", protect, managerOnly, async (req, res) => {
       reason,
     });
 
-    console.log("Attempting to save vacation...");
     const savedVacation = await vacation.save();
-    console.log("Vacation saved successfully:", savedVacation._id);
 
     res.status(201).json(savedVacation);
   } catch (error) {
-    console.error("=== VACATION CREATE ERROR ===");
-    console.error("Error name:", error.name);
-    console.error("Error message:", error.message);
-    console.error("Full error:", error);
+    console.error("Error creating vacation:", error);
 
     if (error.name === "ValidationError") {
       return res.status(400).json({ message: error.message });
@@ -197,7 +185,7 @@ router.put("/:id", protect, managerOnly, async (req, res) => {
     const updatedVacation = await vacation.save();
     res.json(updatedVacation);
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Error updating vacation:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -226,7 +214,7 @@ router.delete("/:id", protect, managerOnly, async (req, res) => {
     await vacation.deleteOne();
     res.json({ message: "Vacation removed" });
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Error deleting vacation:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

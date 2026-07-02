@@ -388,18 +388,29 @@ exports.deleteVenue = async (req, res) => {
 // Upload court image
 exports.uploadCourtImage = async (req, res) => {
   try {
+    console.log("📷 Upload court image function called");
+    console.log("Request file:", req.file);
+    console.log("Request body:", req.body);
+
     if (!req.file) {
-      return res.status(400).json({ message: "No image file provided" });
+      console.log("❌ No file in request");
+      return res.status(400).json({ message: "No file uploaded" });
     }
 
-    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/courts/${req.file.filename}`;
+    console.log("✅ File received:", req.file.originalname);
+    console.log("✅ File saved as:", req.file.filename);
+    console.log("✅ File path:", req.file.path);
+
+    const imageUrl = `/uploads/courts/${req.file.filename}`;
+    console.log("📷 Image URL saved to DB:", imageUrl);
 
     res.json({
-      message: "Image uploaded successfully",
+      success: true,
       imageUrl: imageUrl,
+      message: "Image uploaded successfully",
     });
   } catch (error) {
-    console.error("Upload error:", error);
+    console.error("❌ Error uploading court image:", error);
     res.status(500).json({ message: error.message });
   }
 };

@@ -9,6 +9,8 @@ const paymentMethodRoutes = require("./routes/paymentMethodRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const vacationRoutes = require("./routes/vacationRoutes");
 const eventRoutes = require("./routes/eventRoutes");
+const chatbotRoutes = require("./routes/chatbotRoutes");
+const refundRoutes = require("./routes/refundRoutes");
 const path = require("path");
 
 const publicVenueRoutes = require("./routes/publicVenueRoutes");
@@ -52,12 +54,16 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/venues", publicVenueRoutes);
 app.use("/api/users", userRoutes);
 
+app.use("/api/chatbot", chatbotRoutes);
+
+app.use("/api/refunds", refundRoutes);
+
 // Test route
 app.get("/", (req, res) => {
   res.send("PlayConnect Backend is running on localhost");
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running at http://0.0.0.0:${PORT}`);
 });

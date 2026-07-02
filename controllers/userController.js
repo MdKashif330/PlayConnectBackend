@@ -139,10 +139,46 @@ const getFavorites = async (req, res) => {
   }
 };
 
+// @desc    Update user's current location
+// @route   POST /api/users/location
+// @access  Private
+const updateUserLocation = async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+
+    if (!latitude || !longitude) {
+      return res
+        .status(400)
+        .json({ message: "Latitude and longitude are required" });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $set: {
+          "location.latitude": latitude,
+          "location.longitude": longitude,
+          lastLocationUpdate: new Date(),
+        },
+      },
+      { new: true },
+    ).select("-password");
+
+    res.json({
+      success: true,
+      message: "Location updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating location:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getUserProfile,
   updateUserProfile,
   addFavorite,
   removeFavorite,
   getFavorites,
+  updateUserLocation,
 };

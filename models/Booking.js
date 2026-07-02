@@ -55,19 +55,39 @@ const bookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "PENDING",
-        "PAYMENT_SUBMITTED",
-        "CONFIRMED",
-        "REJECTED",
-        "CANCELLED",
+        "PENDING", // Initial state after booking
+        "AWAITING_PAYMENT", // Manager requested payment
+        "PAYMENT_SUBMITTED", // User uploaded payment proof
+        "CONFIRMED", // Payment verified, booking confirmed
+        "REJECTED", // Booking or payment rejected
+        "CANCELLED", // User cancelled
       ],
       default: "PENDING",
     },
     paymentMethod: {
       type: String,
+      enum: ["cash", "easypaisa", "jazzcash", "bank"],
+      default: null,
     },
     paymentProof: {
+      type: String, // URL to uploaded screenshot
+      default: null,
+    },
+    paymentProofUploadedAt: {
+      type: Date,
+      default: null,
+    },
+    transactionId: {
       type: String,
+      default: null,
+    },
+    paymentRejectionReason: {
+      type: String,
+      default: null,
+    },
+    managerNotes: {
+      type: String,
+      default: null,
     },
     isMultiDay: {
       type: Boolean,
